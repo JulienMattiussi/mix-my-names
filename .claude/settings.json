@@ -1,0 +1,15 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npm install *)",
+      "Bash(npm run *)",
+      "Bash(make check)",
+      "Bash(make lint)",
+      "Bash(make test)",
+      "Bash(make typecheck)",
+      "Bash(make knip)",
+      "Bash(make build)",
+      "Bash(npx tsc *)"
+    ]
+  }
+}
