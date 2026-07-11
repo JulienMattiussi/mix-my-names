@@ -1,12 +1,32 @@
 import { useMemo, useState } from 'react'
+import { findFusion } from '@/lib/fusion'
+import { buildLayout, HEIGHT, SIDE_BEARING, STROKE, type Placement } from '@/lib/layout'
+import { GLYPHS, lowestTrait, type Trait } from '@/lib/glyphs'
+import { matchPrenom, type PrenomMatch } from '@/lib/prenom'
+import { normalizeWord } from '@/lib/text'
 
-const CHAR_WIDTH = 64
-const SIDE_BEARING = 8
-const ROW_HEIGHT = 63
-const ROW_GAP = 11.2
-const HEIGHT = 2 * ROW_HEIGHT + ROW_GAP
-const STROKE = 9
-const PADDING = STROKE
+const INSCRIPTION_FONT_RATIO = 0.75
+const INSCRIPTION_MARGIN = 11
+const INSCRIPTION_MAX_CHAR_WIDTH = 8
+
+type Inscription = { placement: Placement; trait: Trait; word: string }
+
+function traitInfo(placement: Placement, trait: Trait) {
+  const inkLeft = placement.x + SIDE_BEARING
+  const inkRight = placement.x + placement.width - SIDE_BEARING
+  const ax = inkLeft + trait.x1 * (inkRight - inkLeft)
+  const ay = placement.y + trait.y1 * placement.height
+  const bx = inkLeft + trait.x2 * (inkRight - inkLeft)
+  const by = placement.y + trait.y2 * placement.height
+  const length = Math.hypot(bx - ax, by - ay)
+  const horizontal = Math.abs(by - ay) < 0.5
+  const margin = horizontal || length === 0 ? 0 : INSCRIPTION_MARGIN
+  const usable = Math.max(1, length - 2 * margin)
+  const angle = (Math.atan2(by - ay, bx - ax) * 180) / Math.PI
+  const startX = length === 0 ? ax : ax + ((bx - ax) / length) * margin
+  const startY = length === 0 ? ay : ay + ((by - ay) / length) * margin
+  return { angle, usable, startX, startY }
+}
 
 const PALETTE = [
   '#0f172a',
@@ -19,224 +39,9 @@ const PALETTE = [
   '#db2777',
 ]
 
-type Point = [number, number]
-
-const GLYPHS: Record<string, Point[][]> = {
-  M: [
-    [
-      [0, 1],
-      [0, 0],
-      [0.5, 0.6],
-      [1, 0],
-      [1, 1],
-    ],
-  ],
-  A: [
-    [
-      [0, 1],
-      [0.5, 0],
-      [1, 1],
-    ],
-    [
-      [0.18, 0.62],
-      [0.82, 0.62],
-    ],
-  ],
-  S: [
-    [
-      [1, 0.18],
-      [0.72, 0.02],
-      [0.28, 0.02],
-      [0, 0.22],
-      [0.15, 0.45],
-      [0.85, 0.55],
-      [1, 0.78],
-      [0.72, 0.98],
-      [0.28, 0.98],
-      [0, 0.82],
-    ],
-  ],
-  C: [
-    [
-      [1, 0.2],
-      [0.7, 0.02],
-      [0.3, 0.02],
-      [0, 0.25],
-      [0, 0.75],
-      [0.3, 0.98],
-      [0.7, 0.98],
-      [1, 0.8],
-    ],
-  ],
-  H: [
-    [
-      [0, 0],
-      [0, 1],
-    ],
-    [
-      [1, 0],
-      [1, 1],
-    ],
-    [
-      [0, 0.5],
-      [1, 0.5],
-    ],
-  ],
-  T: [
-    [
-      [0, 0],
-      [1, 0],
-    ],
-    [
-      [0.5, 0],
-      [0.5, 1],
-    ],
-  ],
-  R: [
-    [
-      [0, 1],
-      [0, 0],
-      [0.72, 0],
-      [1, 0.18],
-      [1, 0.4],
-      [0.72, 0.55],
-      [0, 0.55],
-    ],
-    [
-      [0.45, 0.55],
-      [1, 1],
-    ],
-  ],
-  L: [
-    [
-      [0, 0],
-      [0, 1],
-      [1, 1],
-    ],
-  ],
-  E: [
-    [
-      [1, 0],
-      [0, 0],
-      [0, 1],
-      [1, 1],
-    ],
-    [
-      [0, 0.5],
-      [0.7, 0.5],
-    ],
-  ],
-  I: [
-    [
-      [0, 0],
-      [1, 0],
-    ],
-    [
-      [0.5, 0],
-      [0.5, 1],
-    ],
-    [
-      [0, 1],
-      [1, 1],
-    ],
-  ],
-  N: [
-    [
-      [0, 1],
-      [0, 0],
-      [1, 1],
-      [1, 0],
-    ],
-  ],
-}
-
-type Segment =
-  | { kind: 'shared'; char: string; kern?: number }
-  | { kind: 'gap'; top: string; bottom: string; kern?: number }
-
-const SEGMENTS: Segment[] = [
-  { kind: 'shared', char: 'M' },
-  { kind: 'shared', char: 'A' },
-  { kind: 'gap', top: 'SCH', bottom: 'R' },
-  { kind: 'shared', char: 'T' },
-  { kind: 'gap', top: 'ALER', bottom: 'IN', kern: -20 },
-]
-
-function segmentWidth(segment: Segment): number {
-  if (segment.kind === 'shared') return CHAR_WIDTH
-  return Math.max(segment.top.length, segment.bottom.length) * CHAR_WIDTH
-}
-
-const TOTAL_WIDTH = SEGMENTS.reduce(
-  (sum, segment) => sum + segmentWidth(segment) + (segment.kern ?? 0),
-  0,
-)
-
-type Row = 'top' | 'bottom' | 'full'
-type Prenom = 'ale' | 'in' | null
-type ColorMode = 'letter' | 'height' | 'prenom'
-
-type Placement = {
-  char: string
-  x: number
-  y: number
-  width: number
-  height: number
-  shared: boolean
-  row: Row
-  prenom: Prenom
-}
-
-function prenomFor(word: string, index: number): Prenom {
-  if (word === 'ALER') return index < 3 ? 'ale' : null
-  if (word === 'IN') return 'in'
-  return null
-}
-
-function placeRow(word: string, startX: number, totalWidth: number, y: number, row: Row): Placement[] {
-  const cellWidth = totalWidth / word.length
-  return [...word].map((char, index) => ({
-    char,
-    x: startX + index * cellWidth,
-    y,
-    width: cellWidth,
-    height: ROW_HEIGHT,
-    shared: false,
-    row,
-    prenom: prenomFor(word, index),
-  }))
-}
-
-function buildPlacements(swapped: boolean): Placement[] {
-  const placements: Placement[] = []
-  let cursor = 0
-  for (const segment of SEGMENTS) {
-    cursor += segment.kern ?? 0
-    if (segment.kind === 'shared') {
-      placements.push({
-        char: segment.char,
-        x: cursor,
-        y: 0,
-        width: CHAR_WIDTH,
-        height: HEIGHT,
-        shared: true,
-        row: 'full',
-        prenom: null,
-      })
-      cursor += CHAR_WIDTH
-    } else {
-      const top = swapped ? segment.bottom : segment.top
-      const bottom = swapped ? segment.top : segment.bottom
-      const width = Math.max(top.length, bottom.length) * CHAR_WIDTH
-      placements.push(...placeRow(top, cursor, width, 0, 'top'))
-      placements.push(...placeRow(bottom, cursor, width, ROW_HEIGHT + ROW_GAP, 'bottom'))
-      cursor += width
-    }
-  }
-  return placements
-}
-
 const HEIGHT_GRADIENT_ID = 'height-split'
+
+type ColorMode = 'letter' | 'height' | 'prenom'
 const COLOR_MODES: { id: ColorMode; label: string }[] = [
   { id: 'letter', label: 'Lettre' },
   { id: 'height', label: 'Hauteur' },
@@ -258,59 +63,19 @@ function Glyph({
   height: number
   color: string
 }) {
-  const polylines = GLYPHS[char]
-  if (!polylines) return null
+  const paths = GLYPHS[char]
+  if (!paths) return null
   const left = x + SIDE_BEARING
   const right = x + width - SIDE_BEARING
   return (
     <g stroke={color} strokeWidth={STROKE} fill="none" strokeLinecap="round" strokeLinejoin="round">
-      {polylines.map((line, index) => (
+      {paths.map((line, index) => (
         <polyline
           key={index}
           points={line.map(([px, py]) => `${left + px * (right - left)},${y + py * height}`).join(' ')}
         />
       ))}
     </g>
-  )
-}
-
-const INSCRIPTION_FONT_SIZE = 6
-
-function InscribedWord({
-  placement,
-  word,
-  color,
-  charWidth,
-  start = 0,
-}: {
-  placement: Placement | undefined
-  word: string
-  color: string
-  charWidth: number
-  start?: number
-}) {
-  if (!placement) return null
-  const inkLeft = placement.x + SIDE_BEARING
-  const inkRight = placement.x + placement.width - SIDE_BEARING
-  const width = word.length * charWidth
-  const left = inkLeft + start * (inkRight - inkLeft)
-  const right = left + width
-  const baseline = placement.y + placement.height
-  return (
-    <text
-      x={(left + right) / 2}
-      y={baseline}
-      textAnchor="middle"
-      dominantBaseline="central"
-      fontFamily="ui-monospace, monospace"
-      fontWeight="bold"
-      fontSize={INSCRIPTION_FONT_SIZE}
-      fill={color}
-      textLength={width}
-      lengthAdjust="spacingAndGlyphs"
-    >
-      {word}
-    </text>
   )
 }
 
@@ -345,24 +110,120 @@ function ColorField({
   )
 }
 
+function WordField({
+  label,
+  value,
+  onChange,
+}: {
+  label: string
+  value: string
+  onChange: (word: string) => void
+}) {
+  return (
+    <label className="block min-w-0 flex-1">
+      <span className="mb-1 block text-xs font-medium text-slate-600">{label}</span>
+      <input
+        type="text"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        className="w-full rounded-md border border-slate-300 px-2 py-1 text-sm uppercase focus:border-slate-500 focus:outline-none"
+      />
+    </label>
+  )
+}
+
+function InscribedWord({
+  inscription,
+  charWidth,
+  color,
+}: {
+  inscription: Inscription
+  charWidth: number
+  color: string
+}) {
+  const { placement, trait, word } = inscription
+  const { angle, startX, startY } = traitInfo(placement, trait)
+  const width = word.length * charWidth
+  return (
+    <text
+      transform={`translate(${startX} ${startY}) rotate(${angle})`}
+      textAnchor="start"
+      dominantBaseline="central"
+      fontFamily="ui-monospace, monospace"
+      fontWeight="bold"
+      fontSize={charWidth * INSCRIPTION_FONT_RATIO}
+      fill={color}
+      textLength={width}
+      lengthAdjust="spacingAndGlyphs"
+    >
+      {word}
+    </text>
+  )
+}
+
 export default function App() {
-  const [colorMode, setColorMode] = useState<ColorMode>('letter')
+  const [wordA, setWordA] = useState('DURONT')
+  const [wordB, setWordB] = useState('MARTIN')
+  const [prenomTop, setPrenomTop] = useState('JEAN')
+  const [prenomBottom, setPrenomBottom] = useState('MARIE')
+  const [swapped, setSwapped] = useState(false)
+  const [colorMode, setColorMode] = useState<ColorMode>('prenom')
   const [sharedColor, setSharedColor] = useState('#f59e0b')
   const [uniqueColor, setUniqueColor] = useState('#0f172a')
   const [topColor, setTopColor] = useState('#f59e0b')
   const [bottomColor, setBottomColor] = useState('#2563eb')
-  const [aleColor, setAleColor] = useState('#e11d48')
-  const [inColor, setInColor] = useState('#2563eb')
-  const [otherColor, setOtherColor] = useState('#0f172a')
+  const [topNameColor, setTopNameColor] = useState('#e11d48')
+  const [bottomNameColor, setBottomNameColor] = useState('#2563eb')
+  const [otherColor, setOtherColor] = useState('#16a34a')
   const [background, setBackground] = useState('#f8fafc')
-  const [swapped, setSwapped] = useState(false)
-  const [showInscriptions, setShowInscriptions] = useState(false)
 
-  const placements = useMemo(() => buildPlacements(swapped), [swapped])
+  const topWord = normalizeWord(swapped ? wordB : wordA)
+  const bottomWord = normalizeWord(swapped ? wordA : wordB)
+  const topName = normalizeWord(prenomTop)
+  const bottomName = normalizeWord(prenomBottom)
 
-  const ePlacement = placements.find((placement) => placement.char === 'E')
-  const iPlacement = placements.find((placement) => placement.char === 'I')
-  const inscriptionCharWidth = ePlacement ? (ePlacement.width - 2 * SIDE_BEARING) / 'XANDRA'.length : 0
+  const anchors = useMemo(() => findFusion(topWord, bottomWord), [topWord, bottomWord])
+  const { placements, width } = useMemo(
+    () => buildLayout(topWord, bottomWord, anchors),
+    [topWord, bottomWord, anchors],
+  )
+
+  const topMatch = useMemo(
+    () => (topName ? matchPrenom(topWord, topName, new Set(anchors.map((a) => a.i))) : null),
+    [topWord, topName, anchors],
+  )
+  const bottomMatch = useMemo(
+    () => (bottomName ? matchPrenom(bottomWord, bottomName, new Set(anchors.map((a) => a.j))) : null),
+    [bottomWord, bottomName, anchors],
+  )
+
+  const inscriptions = useMemo<Inscription[]>(() => {
+    const result: Inscription[] = []
+    const add = (match: PrenomMatch | null, key: 'topIndex' | 'bottomIndex') => {
+      if (!match || match.remainder.length === 0) return
+      const placement = placements.find((item) => item[key] === match.junctionIndex)
+      if (!placement) return
+      const trait = lowestTrait(GLYPHS[placement.char] ?? [])
+      if (!trait) return
+      result.push({ placement, trait, word: match.remainder })
+    }
+    add(topMatch, 'topIndex')
+    add(bottomMatch, 'bottomIndex')
+    return result
+  }, [topMatch, bottomMatch, placements])
+
+  const inscriptionCharWidth = useMemo(() => {
+    let charWidth = Infinity
+    for (const inscription of inscriptions) {
+      if (inscription.word.length === 0) continue
+      const { usable } = traitInfo(inscription.placement, inscription.trait)
+      charWidth = Math.min(charWidth, usable / inscription.word.length)
+    }
+    return Number.isFinite(charWidth) ? Math.min(charWidth, INSCRIPTION_MAX_CHAR_WIDTH) : 0
+  }, [inscriptions])
+
+  const inMatch = (match: PrenomMatch | null, index: number | undefined): boolean =>
+    match !== null && index !== undefined && index >= match.start && index < match.start + match.length
 
   const colorFor = (placement: Placement): string => {
     if (colorMode === 'letter') return placement.shared ? sharedColor : uniqueColor
@@ -371,8 +232,8 @@ export default function App() {
       if (placement.row === 'bottom') return bottomColor
       return `url(#${HEIGHT_GRADIENT_ID})`
     }
-    if (placement.prenom === 'ale') return aleColor
-    if (placement.prenom === 'in') return inColor
+    if (inMatch(topMatch, placement.topIndex)) return topNameColor
+    if (inMatch(bottomMatch, placement.bottomIndex)) return bottomNameColor
     return otherColor
   }
 
@@ -382,6 +243,21 @@ export default function App() {
       style={{ backgroundColor: background }}
     >
       <aside className="absolute left-4 top-4 flex w-72 flex-col gap-3 rounded-xl border border-slate-200 bg-white/90 p-4 shadow-lg backdrop-blur">
+        <div>
+          <div className="mb-1 text-xs font-semibold text-slate-700">Haut</div>
+          <div className="flex gap-2">
+            <WordField label="Nom" value={swapped ? wordB : wordA} onChange={swapped ? setWordB : setWordA} />
+            <WordField label="Prénom" value={prenomTop} onChange={setPrenomTop} />
+          </div>
+        </div>
+        <div>
+          <div className="mb-1 text-xs font-semibold text-slate-700">Bas</div>
+          <div className="flex gap-2">
+            <WordField label="Nom" value={swapped ? wordA : wordB} onChange={swapped ? setWordA : setWordB} />
+            <WordField label="Prénom" value={prenomBottom} onChange={setPrenomBottom} />
+          </div>
+        </div>
+
         <div>
           <div className="mb-1 text-xs font-medium text-slate-600">Mode de couleur</div>
           <div className="flex gap-1">
@@ -411,14 +287,14 @@ export default function App() {
         )}
         {colorMode === 'height' && (
           <>
-            <ColorField label="Mot du haut" value={topColor} onChange={setTopColor} />
-            <ColorField label="Mot du bas" value={bottomColor} onChange={setBottomColor} />
+            <ColorField label="Nom du haut" value={topColor} onChange={setTopColor} />
+            <ColorField label="Nom du bas" value={bottomColor} onChange={setBottomColor} />
           </>
         )}
         {colorMode === 'prenom' && (
           <>
-            <ColorField label="ALE (Alexandra)" value={aleColor} onChange={setAleColor} />
-            <ColorField label="IN (Kevin)" value={inColor} onChange={setInColor} />
+            <ColorField label={topName || 'Prénom du haut'} value={topNameColor} onChange={setTopNameColor} />
+            <ColorField label={bottomName || 'Prénom du bas'} value={bottomNameColor} onChange={setBottomNameColor} />
             <ColorField label="Autres lettres" value={otherColor} onChange={setOtherColor} />
           </>
         )}
@@ -432,56 +308,42 @@ export default function App() {
         >
           Inverser les mots
         </button>
-        <button
-          type="button"
-          onClick={() => setShowInscriptions((value) => !value)}
-          aria-pressed={showInscriptions}
-          className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100"
-        >
-          {showInscriptions ? 'Masquer XANDRA et KEV' : 'Afficher XANDRA et KEV'}
-        </button>
       </aside>
 
-      <svg
-        viewBox={`${-PADDING} ${-PADDING} ${TOTAL_WIDTH + 2 * PADDING} ${HEIGHT + 2 * PADDING}`}
-        className="w-full max-w-4xl"
-        role="img"
-        aria-label="MASCHTALER et MARTIN partageant les lettres M, A et T"
-      >
-        <defs>
-          <linearGradient id={HEIGHT_GRADIENT_ID} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2={HEIGHT}>
-            <stop offset="0.5" stopColor={topColor} />
-            <stop offset="0.5" stopColor={bottomColor} />
-          </linearGradient>
-        </defs>
-        {placements.map((placement, index) => (
-          <Glyph
-            key={index}
-            char={placement.char}
-            x={placement.x}
-            y={placement.y}
-            width={placement.width}
-            height={placement.height}
-            color={colorFor(placement)}
-          />
-        ))}
-        {showInscriptions && (
-          <>
-            <InscribedWord
-              placement={ePlacement}
-              word="XANDRA"
-              color={background}
-              charWidth={inscriptionCharWidth}
+      {width > 0 && (
+        <svg
+          viewBox={`${-STROKE} ${-STROKE} ${width + 2 * STROKE} ${HEIGHT + 2 * STROKE}`}
+          className="w-full max-w-4xl"
+          role="img"
+          aria-label={`${topWord} et ${bottomWord}`}
+        >
+          <defs>
+            <linearGradient id={HEIGHT_GRADIENT_ID} gradientUnits="userSpaceOnUse" x1="0" y1="0" x2="0" y2={HEIGHT}>
+              <stop offset="0.5" stopColor={topColor} />
+              <stop offset="0.5" stopColor={bottomColor} />
+            </linearGradient>
+          </defs>
+          {placements.map((placement, index) => (
+            <Glyph
+              key={index}
+              char={placement.char}
+              x={placement.x}
+              y={placement.y}
+              width={placement.width}
+              height={placement.height}
+              color={colorFor(placement)}
             />
+          ))}
+          {inscriptions.map((inscription, index) => (
             <InscribedWord
-              placement={iPlacement}
-              word="KEV"
-              color={background}
+              key={index}
+              inscription={inscription}
               charWidth={inscriptionCharWidth}
+              color={background}
             />
-          </>
-        )}
-      </svg>
+          ))}
+        </svg>
+      )}
     </main>
   )
 }

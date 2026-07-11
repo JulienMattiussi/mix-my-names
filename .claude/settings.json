@@ -9,7 +9,9 @@
       "Bash(make typecheck)",
       "Bash(make knip)",
       "Bash(make build)",
-      "Bash(npx tsc *)"
+      "Bash(npx tsc *)",
+      "Bash(make check *)",
+      "Bash(make test *)"
     ]
   }
 }

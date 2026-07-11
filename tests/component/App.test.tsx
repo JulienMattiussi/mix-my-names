@@ -4,6 +4,6 @@ import App from '@/App'
 describe('App', () => {
   it('renders the shared-letter figure', () => {
     render(<App />)
-    expect(screen.getByRole('img', { name: /MASCHTALER.*MARTIN/i })).toBeInTheDocument()
+    expect(screen.getByRole('img', { name: /DURONT.*MARTIN/i })).toBeInTheDocument()
   })
 })
