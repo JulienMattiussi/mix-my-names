@@ -1,11 +1,11 @@
 {
-  "name": "sandbox",
+  "name": "mix-my-names",
   "private": true,
   "version": "0.1.0",
-  "author": "Julien",
+  "author": "YavaDeus",
   "license": "MIT",
   "type": "module",
-  "description": "Bac à sable React vierge.",
+  "description": "Compose deux noms en un monogramme typographique : les lettres communes fusionnent, les prénoms s'inscrivent sur les lettres.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
