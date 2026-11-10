@@ -6,7 +6,7 @@
 
 ![mix-my-names](public/og.png)
 
-**[mix-my-names.vercel.app](https://mix-my-names.vercel.app)**
+**[mix-my-names.yavadeus.dev](https://mix-my-names.yavadeus.dev)**
 
 ![React](https://img.shields.io/badge/React-19-149ECA?logo=react&logoColor=white)
 ![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?logo=typescript&logoColor=white)

@@ -7,7 +7,7 @@ au-dessus et en dessous. L'ensemble s'inscrit dans un rectangle. Les prénoms,
 eux, se gravent en petit le long d'un trait de la lettre appropriée.
 
 Application **100% front-end**, sans backend. Interface en **français**.
-Déployée sur **https://mix-my-names.vercel.app**.
+Déployée sur **https://mix-my-names.yavadeus.dev**.
 
 ---
 
